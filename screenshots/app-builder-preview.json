@@ -1,0 +1,36 @@
+{
+  "url": "http://127.0.0.1:8080/",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "K.engine — Motor de IA local independiente",
+      "hasCanvas": false,
+      "bodyTextLen": 7405,
+      "bodyTextHash": "d89c4e7f3e0bd440cd11ffd404ae17fb5aa611b46380666c795e2b6d7ff373c6",
+      "bodyTextPrefix": "K.engine ENGINE CATÁLOGO MODEL LAB HARDWARE API WEBLLM TEST ↗ In",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "K.engine — Motor de IA local independiente",
+      "hasCanvas": false,
+      "bodyTextLen": 7338,
+      "bodyTextHash": "f7418bdd72a738c14a3b8a10b0f69a0a0c541dc00326525ac87ef1b98fde72e5",
+      "bodyTextPrefix": "K.engine // MOTOR DE INFERENCIA LOCAL · FASE 1 El motor de IA in",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/app-builder-preview.json"
+}

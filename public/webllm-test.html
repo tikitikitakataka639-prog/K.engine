@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WebLLM Clean Test — K.ENGINE</title>
+<meta name="description" content="Prueba mínima y aislada de WebLLM: prebuiltAppConfig + CreateMLCEngine, sin patch de Cache API.">
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script>
+tailwind.config = { theme: { extend: {
+  fontFamily: { display: ['"Space Grotesk"','sans-serif'], mono: ['"IBM Plex Mono"','monospace'] },
+  colors: { ink: {950:'#07090c',900:'#0b0e13',800:'#11151c',700:'#1a2029',600:'#252d39',500:'#3a4553'},
+    volt:'#3dffb0', amber2:'#ffb340', red2:'#ff5d5d' } } } }
+</script>
+<style>
+  body { font-family: 'Space Grotesk', sans-serif; background: #07090c; color: #e6ebf2; }
+  .mono { font-family: 'IBM Plex Mono', monospace; }
+</style>
+</head>
+<body class="bg-ink-950 antialiased">
+<header class="border-b border-ink-700 bg-ink-900/60">
+  <div class="max-w-5xl mx-auto px-4 py-5 flex items-center justify-between flex-wrap gap-3">
+    <div>
+      <p class="mono text-[11px] uppercase tracking-[0.25em] text-volt">K.ENGINE · prueba mínima aislada</p>
+      <h1 class="font-display font-bold text-2xl text-white mt-1">WebLLM Clean Test</h1>
+    </div>
+    <a href="/" class="mono text-xs uppercase tracking-wider text-slate-400 hover:text-volt">← Volver a K.ENGINE</a>
+  </div>
+</header>
+
+<main class="max-w-5xl mx-auto px-4 py-10 space-y-6">
+  <p class="text-sm text-slate-400 leading-relaxed">
+    Sin ModelManager, sin worker de K.ENGINE, sin Service Worker propio, sin patch de Cache API,
+    sin fetch manual de modelos, sin reintentos. Solo:
+    <span class="mono text-volt">navegador → WebGPU → @mlc-ai/web-llm (versión fijada) → prebuiltAppConfig → CreateMLCEngine → inferencia</span>.
+    El modelo se obtiene de <span class="mono text-volt">model_list</span>; nunca se inventa una URL.
+  </p>
+
+  <div class="flex flex-wrap gap-3">
+    <button id="runBtn" class="mono text-sm bg-volt text-ink-950 font-semibold px-5 py-2.5 rounded-md hover:bg-emerald-300 transition">EJECUTAR TEST COMPLETO</button>
+    <button id="swUnregisterBtn" class="mono text-xs uppercase tracking-wider border border-amber2/50 text-amber2 px-4 py-2.5 rounded-md hover:bg-amber2/10 transition">Desregistrar Service Workers</button>
+  </div>
+
+  <p id="fileWarning" class="hidden mono text-xs text-red2 bg-red2/10 border border-red2/30 rounded p-3">
+    ERROR: debe ejecutarse mediante localhost o HTTPS. El contexto file:// no es compatible.
+  </p>
+  <p id="invalidCtx" class="hidden mono text-sm text-red2 bg-red2/10 border border-red2/30 rounded p-4 font-semibold">
+    INVALID TEST CONTEXT — RUN THIS FILE FROM HTTP/HTTPS<br>
+    <span class="font-normal text-xs text-red2/80">
+      La página está en about:srcdoc / Origin null (sandbox). Esta prueba NO es válida:
+      no se importará WebLLM. Sirve el archivo con un servidor HTTP real y abre
+      http://127.0.0.1:5173/webllm-test.html
+    </span>
+  </p>
+
+  <section class="bg-ink-900 border border-ink-600 rounded-lg overflow-hidden">
+    <div class="px-5 py-2.5 border-b border-ink-700 bg-ink-800 mono text-[11px] uppercase tracking-widest text-slate-500">Environment</div>
+    <dl id="envDl" class="p-5 mono text-xs space-y-2 text-slate-300"></dl>
+  </section>
+
+  <section class="bg-ink-900 border border-ink-600 rounded-lg overflow-hidden">
+    <div class="px-5 py-2.5 border-b border-ink-700 bg-ink-800 mono text-[11px] uppercase tracking-widest text-slate-500">Service Workers</div>
+    <dl id="swDl" class="p-5 mono text-xs space-y-2 text-slate-300"></dl>
+  </section>
+
+  <section class="bg-ink-900 border border-ink-600 rounded-lg overflow-hidden">
+    <div class="px-5 py-2.5 border-b border-ink-700 bg-ink-800 mono text-[11px] uppercase tracking-widest text-slate-500">Progress (initProgressCallback · p.text literal)</div>
+    <div id="progBox" class="p-5 mono text-xs space-y-1.5 text-slate-300 max-h-64 overflow-y-auto"></div>
+  </section>
+
+  <section class="bg-ink-900 border border-ink-600 rounded-lg overflow-hidden">
+    <div class="px-5 py-2.5 border-b border-ink-700 bg-ink-800 mono text-[11px] uppercase tracking-widest text-slate-500">WebLLM</div>
+    <dl id="wlDl" class="p-5 mono text-xs space-y-2 text-slate-300"></dl>
+  </section>
+
+  <section class="bg-ink-900 border border-ink-600 rounded-lg overflow-hidden">
+    <div class="px-5 py-2.5 border-b border-ink-700 bg-ink-800 mono text-[11px] uppercase tracking-widest text-slate-500">CreateMLCEngine + Inference</div>
+    <dl id="runDl" class="p-5 mono text-xs space-y-2 text-slate-300"></dl>
+  </section>
+
+  <section class="bg-ink-900 border border-ink-600 rounded-lg overflow-hidden">
+    <div class="px-5 py-2.5 border-b border-ink-700 bg-ink-800 mono text-[11px] uppercase tracking-widest text-slate-500">K.ENGINE DIAGNOSTIC RESULT</div>
+    <pre id="diagPre" class="p-5 mono text-xs text-slate-300 whitespace-pre-wrap leading-relaxed">Pulsa EJECUTAR TEST COMPLETO.</pre>
+  </section>
+</main>
+
+<script>
+"use strict";
+
+const WEBLLM_PINNED = "0.2.79";
+const TARGET_MODEL = "Llama-3.2-1B-Instruct-q4f16_1-MLC";
+const WEBLLM_SOURCES = [
+  "https://esm.sh/@mlc-ai/web-llm@" + WEBLLM_PINNED,
+  "https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@" + WEBLLM_PINNED + "/lib/index.js",
+  "https://esm.run/@mlc-ai/web-llm@" + WEBLLM_PINNED
+];
+
+const $id = (i) => document.getElementById(i);
+
+function row(dl, k, v, cls) {
+  const d = document.createElement("div");
+  d.className = "flex justify-between gap-4";
+  const a = document.createElement("dt");
+  a.className = "text-slate-500";
+  a.textContent = k;
+  const b = document.createElement("dd");
+  b.className = "text-right break-all " + (cls || "text-slate-200");
+  b.textContent = v;
+  d.append(a, b);
+  dl.appendChild(d);
+  return b;
+}
+
+function detail(dl, obj) {
+  for (const [k, v] of Object.entries(obj)) {
+    const s = v === null || v === undefined ? "N/A" : String(v);
+    const cls = /PASS/i.test(s) ? "text-volt font-semibold"
+      : /FAIL|ERROR|INVALID/i.test(s) ? "text-red2"
+      : "text-slate-200";
+    row(dl, k, s, cls);
+  }
+}
+
+function isSandboxedCtx() {
+  const href = String(location.href || "");
+  if (href === "about:srcdoc" || href.startsWith("about:")) return true;
+  if (location.protocol === "about:" || location.protocol === "blob:" || location.protocol === "data:") return true;
+  try { if (location.origin === "null") return true; } catch (e) { return true; }
+  try { navigator.serviceWorker; } catch (e) { return true; }
+  return false;
+}
+
+const VALID_CTX = !isSandboxedCtx();
+
+if (!VALID_CTX) {
+  $id("invalidCtx").classList.remove("hidden");
+  $id("runBtn").disabled = true;
+  $id("runBtn").classList.add("opacity-40", "cursor-not-allowed");
+  $id("runBtn").textContent = "CONTEXTO INVÁLIDO — TEST BLOQUEADO";
+  console.warn("[TEST] INVALID TEST CONTEXT");
+}
+
+(function showEnv() {
+  const dl = $id("envDl");
+  const protocol = location.protocol;
+  detail(dl, {
+    "URL": location.href,
+    "Origin": location.origin,
+    "Protocol": protocol,
+    "Secure Context": String(window.isSecureContext),
+    "Localhost": String(location.hostname === "localhost" || location.hostname === "127.0.0.1"),
+    "Online": String(navigator.onLine),
+    "file://": String(protocol === "file:"),
+    "Cache Storage": String("caches" in window),
+    "IndexedDB": String("indexedDB" in window),
+    "WebGPU API": String("gpu" in navigator),
+    "Web Worker": String(typeof Worker !== "undefined"),
+    "Browser": navigator.userAgent
+  });
+  if (protocol === "file:") $id("fileWarning").classList.remove("hidden");
+})();
+
+function swAvailable() {
+  try { return !!navigator.serviceWorker; } catch (e) { return false; }
+}
+function swAccessError() {
+  try { navigator.serviceWorker; return null; } catch (e) { return String((e && e.message) || e); }
+}
+async function listSW() {
+  const dl = $id("swDl");
+  dl.textContent = "";
+  if (!swAvailable()) {
+    row(dl, "Service Workers", "NO DISPONIBLE", "text-amber2");
+    const err = swAccessError();
+    if (err) row(dl, "Motivo", err, "text-slate-400");
+    return { count: 0, present: false };
+  }
+  const regs = await navigator.serviceWorker.getRegistrations();
+  row(dl, "Service Workers", regs.length === 0 ? "NONE" : "PRESENT (" + regs.length + ")", regs.length ? "text-amber2" : "text-volt");
+  row(dl, "Controller", navigator.serviceWorker.controller ? navigator.serviceWorker.controller.scriptURL : "NINGUNO");
+  regs.forEach((r, i) => {
+    row(dl, "SW #" + i + " scope", r.scope);
+    row(dl, "SW #" + i + " script", (r.active && r.active.scriptURL) || (r.installing && r.installing.scriptURL) || "N/A");
+    row(dl, "SW #" + i + " state", (r.active && r.active.state) || "N/A");
+  });
+  return { count: regs.length, present: regs.length > 0 };
+}
+$id("swUnregisterBtn").addEventListener("click", async () => {
+  if (!swAvailable()) {
+    row($id("swDl"), "Desregistrar", "No disponible: " + swAccessError(), "text-amber2");
+    return;
+  }
+  const regs = await navigator.serviceWorker.getRegistrations();
+  const before = regs.length;
+  for (const r of regs) {
+    try { await r.unregister(); } catch (e) { console.warn(e); }
+  }
+  await listSW();
+  row($id("swDl"), "Desregistrados", before + " → recarga la página y vuelve a ejecutar el test", "text-amber2");
+});
+
+let swInfo = { count: 0, present: false };
+listSW().then((info) => { swInfo = info; });
+
+let webllm = null;
+let webllmSource = null;
+async function loadWebLLM() {
+  if (webllm) return webllm;
+  const errors = [];
+  for (const src of WEBLLM_SOURCES) {
+    try {
+      console.info("[TEST] Importando WebLLM desde:", src);
+      const mod = await import(/* @vite-ignore */ src);
+      if (!mod || !mod.prebuiltAppConfig || !mod.CreateMLCEngine) {
+        throw new Error("El módulo no expone prebuiltAppConfig/CreateMLCEngine");
+      }
+      webllm = mod;
+      webllmSource = src;
+      console.info("[TEST] WebLLM OK desde:", src, "version:", mod.version || WEBLLM_PINNED);
+      return webllm;
+    } catch (e) {
+      const msg = String((e && e.message) || e);
+      console.error("[TEST] Fallo importando " + src + " →", e);
+      errors.push(src + " → " + msg);
+    }
+  }
+  throw new Error("Ningún CDN pudo servir @mlc-ai/web-llm@" + WEBLLM_PINNED + ":\n" + errors.join("\n"));
+}
+
+function findTargetModel(list) {
+  const exact = list.find((m) => m.model_id === TARGET_MODEL);
+  if (exact) return exact;
+  return list.find((m) => m.model_id.includes("Llama-3.2-1B-Instruct-q4f16_1")) || null;
+}
+
+function writeDiag(d) {
+  $id("diagPre").textContent =
+`================================
+K.ENGINE DIAGNOSTIC RESULT
+================================
+
+Execution URL: ${d.url}
+Origin: ${d.origin}
+Protocol: ${d.protocol}
+
+WebLLM version: ${d.webllmVersion}
+WebLLM import: ${d.webllmImport}
+Source: ${d.source}
+
+Model: ${d.model}
+Model available: ${d.modelAvailable}
+
+WebGPU: ${d.webgpu}
+Service Worker: ${d.serviceWorker}
+
+CreateMLCEngine: ${d.createEngine}
+Cache.add: ${d.cacheAdd}
+Inference: ${d.inference}
+
+Original Error:
+${d.originalError}
+
+Last WebLLM Progress:
+${d.lastProgress}
+
+ROOT CAUSE:
+${d.rootCause}
+
+EVIDENCE:
+${d.evidence}
+
+CONFIDENCE:
+${d.confidence}
+`;
+}
+
+$id("runBtn").addEventListener("click", async () => {
+  if (!VALID_CTX) {
+    $id("invalidCtx").classList.remove("hidden");
+    writeDiag({
+      url: location.href, origin: String(location.origin), protocol: location.protocol,
+      webllmVersion: WEBLLM_PINNED, webllmImport: "NOT TESTED", source: "N/A",
+      model: TARGET_MODEL, modelAvailable: "NOT TESTED",
+      webgpu: "NOT TESTED", serviceWorker: "NOT TESTED",
+      createEngine: "NOT TESTED", cacheAdd: "NOT TESTED", inference: "NOT TESTED",
+      originalError: "(contexto inválido)", lastProgress: "—",
+      rootCause: "NO SE HA PROBADO CACHE.ADD — contexto inválido (about:srcdoc / Origin null)",
+      evidence: "La página no se ejecuta en HTTP/HTTPS real. Ningún resultado aquí es evidencia sobre WebLLM.",
+      confidence: "LOW"
+    });
+    return;
+  }
+
+  const btn = $id("runBtn");
+  btn.disabled = true;
+  btn.textContent = "EJECUTANDO…";
+
+  $id("progBox").textContent = "";
+  $id("wlDl").textContent = "";
+  $id("runDl").textContent = "";
+
+  const diag = {
+    url: location.href,
+    origin: location.origin,
+    protocol: location.protocol,
+    webllmVersion: WEBLLM_PINNED,
+    webllmImport: "NOT TESTED",
+    source: "N/A",
+    model: TARGET_MODEL,
+    modelAvailable: "NOT TESTED",
+    webgpu: "NOT TESTED",
+    serviceWorker: swInfo.present ? "PRESENT" : "NONE",
+    createEngine: "NOT TESTED",
+    cacheAdd: "NOT TESTED",
+    inference: "NOT TESTED",
+    originalError: "—",
+    lastProgress: "—",
+    rootCause: "UNDETERMINED",
+    evidence: "",
+    confidence: "LOW"
+  };
+
+  let lastProgress = "—";
+  const runDl = $id("runDl");
+
+  try {
+    let webgpuLabel = "FAIL";
+    if (navigator.gpu) {
+      try {
+        const ad = await navigator.gpu.requestAdapter();
+        if (ad) {
+          webgpuLabel = "PASS";
+          let info = {};
+          try { info = ad.info || (ad.requestAdapterInfo ? await ad.requestAdapterInfo() : {}); } catch (_) {}
+          row($id("envDl"), "WebGPU adapter", info.description || info.vendor || info.architecture || "detected", "text-volt");
+        } else {
+          webgpuLabel = "FAIL (adapter null)";
+        }
+      } catch (e) {
+        webgpuLabel = "FAIL (" + String((e && e.message) || e) + ")";
+      }
+    } else {
+      webgpuLabel = "FAIL (navigator.gpu missing)";
+    }
+    diag.webgpu = webgpuLabel;
+    row($id("envDl"), "WebGPU", webgpuLabel, /PASS/.test(webgpuLabel) ? "text-volt" : "text-red2");
+
+    row(runDl, "Status", "Importando WebLLM…", "text-amber2");
+    const W = await loadWebLLM();
+    diag.webllmImport = "PASS";
+    diag.source = webllmSource || "N/A";
+    diag.webllmVersion = (W.version || WEBLLM_PINNED) + " (pinned " + WEBLLM_PINNED + ")";
+
+    const list = W.prebuiltAppConfig.model_list;
+    const record = findTargetModel(list);
+    detail($id("wlDl"), {
+      "WebLLM version": diag.webllmVersion,
+      "Source": diag.source,
+      "Registry size": String(list.length),
+      "Target": TARGET_MODEL,
+      "Model found": record ? record.model_id : "NO",
+      "Model URL": record ? (record.model || "N/A") : "N/A",
+      "Model Lib": record ? (record.model_lib || "N/A") : "N/A"
+    });
+
+    if (!record) {
+      diag.modelAvailable = "NO";
+      diag.createEngine = "NOT TESTED";
+      diag.cacheAdd = "NOT TESTED";
+      const ids = list.map((m) => m.model_id).slice(0, 40).join("\n");
+      row(runDl, "Status", "FAIL — modelo no en model_list", "text-red2");
+      row(runDl, "Disponibles (muestra)", ids, "text-amber2");
+      diag.rootCause = "NO SE HA PROBADO CACHE.ADD — modelo no encontrado en prebuiltAppConfig.model_list";
+      diag.evidence = "Target " + TARGET_MODEL + " no está en el registro de WebLLM " + WEBLLM_PINNED + ".";
+      diag.confidence = "HIGH";
+      writeDiag(diag);
+      btn.disabled = false;
+      btn.textContent = "EJECUTAR TEST COMPLETO";
+      return;
+    }
+
+    diag.model = record.model_id;
+    diag.modelAvailable = "YES";
+
+    if (!/PASS/.test(webgpuLabel)) {
+      diag.createEngine = "NOT TESTED";
+      diag.cacheAdd = "NOT TESTED";
+      diag.rootCause = "NO SE HA PROBADO CACHE.ADD — WebGPU no disponible";
+      diag.evidence = "navigator.gpu / requestAdapter falló: " + webgpuLabel;
+      diag.confidence = "HIGH";
+      row(runDl, "Status", "FAIL — WebGPU requerido", "text-red2");
+      writeDiag(diag);
+      btn.disabled = false;
+      btn.textContent = "EJECUTAR TEST COMPLETO";
+      return;
+    }
+
+    row(runDl, "Status", "RUNNING CreateMLCEngine…", "text-amber2");
+    const progBox = $id("progBox");
+
+    try {
+      const engine = await W.CreateMLCEngine(record.model_id, {
+        appConfig: W.prebuiltAppConfig,
+        initProgressCallback: (p) => {
+          lastProgress = p && p.text != null ? String(p.text) : String(p);
+          const line = Math.round((p.progress || 0) * 100) + "% · " + lastProgress;
+          console.log("[TEST PROGRESS]", lastProgress, Math.round((p.progress || 0) * 100) + "%");
+          const el = document.createElement("p");
+          el.textContent = line;
+          el.className = "break-all border-b border-ink-700 pb-1";
+          progBox.appendChild(el);
+          progBox.scrollTop = progBox.scrollHeight;
+        }
+      });
+
+      diag.createEngine = "PASS";
+      diag.cacheAdd = "NOT REPRODUCED";
+      row(runDl, "CreateMLCEngine", "PASS", "text-volt font-semibold");
+
+      const res = await engine.chat.completions.create({
+        messages: [{ role: "user", content: "Responde únicamente: KERNEL TEST OK" }],
+        max_tokens: 16,
+        temperature: 0
+      });
+      const text = (res.choices && res.choices[0] && res.choices[0].message && res.choices[0].message.content) || "";
+      try { await engine.unload(); } catch (_) {}
+
+      diag.inference = "PASS";
+      diag.lastProgress = lastProgress;
+      diag.originalError = "—";
+      diag.rootCause = "El error Cache.add() no se reproduce en la prueba mínima limpia.";
+      diag.evidence = "CreateMLCEngine + inferencia OK con WebLLM " + WEBLLM_PINNED +
+        ", modelo " + record.model_id + ", sin patch de Cache, en HTTP real. Si K.ENGINE falla, comparar con esta ruta (worker, etc.).";
+      diag.confidence = "HIGH";
+
+      row(runDl, "Inference", "PASS", "text-volt font-semibold");
+      row(runDl, "Response", text || "(vacío)", "text-volt");
+      row(runDl, "Error", "ninguno");
+    } catch (loadErr) {
+      const msg = String((loadErr && loadErr.message) || loadErr);
+      const stack = (loadErr && loadErr.stack) ? String(loadErr.stack) : "";
+      diag.createEngine = "FAIL";
+      diag.inference = "FAIL";
+      diag.originalError = msg + (stack ? "\n" + stack : "");
+      diag.lastProgress = lastProgress;
+
+      row(runDl, "CreateMLCEngine", "FAIL", "text-red2 font-semibold");
+      row(runDl, "ORIGINAL ERROR", msg, "text-red2");
+      if (stack) row(runDl, "STACK", stack.slice(0, 500), "text-slate-400");
+      row(runDl, "LAST WEBLLM PROGRESS", lastProgress, "text-amber2");
+
+      if (/Cache\.add|network error/i.test(msg)) {
+        diag.cacheAdd = "REPRODUCED";
+        diag.rootCause = "CACHE.ADD ERROR REPRODUCIDO EN PRUEBA LIMPIA";
+        diag.evidence = "CreateMLCEngine falló con el error original de Cache.add() fuera de K.ENGINE y fuera de about:srcdoc. " +
+          "Último progreso WebLLM: " + lastProgress + ". Revisar DevTools → Network para el recurso exacto.";
+        diag.confidence = "HIGH";
+      } else {
+        diag.cacheAdd = "NOT TESTED";
+        diag.rootCause = "NO SE HA PROBADO CACHE.ADD — fallo distinto antes/durante CreateMLCEngine";
+        diag.evidence = "Error: " + msg + ". No es el mensaje Cache.add() network error (o no se alcanzó esa fase).";
+        diag.confidence = "MEDIUM";
+      }
+      console.error("[TEST] Error ORIGINAL:", loadErr);
+    }
+  } catch (err) {
+    const msg = String((err && err.message) || err);
+    diag.webllmImport = diag.webllmImport === "PASS" ? "PASS" : "FAIL";
+    diag.createEngine = "NOT TESTED";
+    diag.cacheAdd = "NOT TESTED";
+    diag.originalError = msg + (err && err.stack ? "\n" + err.stack : "");
+    diag.rootCause = "NO SE HA PROBADO CACHE.ADD — fallo antes de CreateMLCEngine";
+    diag.evidence = msg;
+    diag.confidence = "MEDIUM";
+    row(runDl, "Status", "FAIL", "text-red2");
+    row(runDl, "Error ORIGINAL", msg, "text-red2");
+    console.error("[TEST] Error:", err);
+  }
+
+  writeDiag(diag);
+  btn.disabled = false;
+  btn.textContent = "EJECUTAR TEST COMPLETO";
+});
+</script>
+</body>
+</html>
