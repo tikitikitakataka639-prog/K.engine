@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Arranca K.ENGINE (server.js) y Vite en el mismo comando.
- * Vite sirve la UI React en 0.0.0.0:8080 y proxifica /health /models /chat /config /bridge al motor.
+ * Vite sirve la UI React (puerto de vite.config.ts, 8080) y proxifica /health /models /chat /config /bridge al motor.
  */
 import { spawn } from "node:child_process";
 import http from "node:http";
@@ -76,15 +76,8 @@ try {
   shutdown(1);
 }
 
-const vite = spawnChild(process.execPath, [
-  path.join(root, "scripts/with-app-env.mjs"),
-  "vite",
-  "dev",
-  "--host",
-  "0.0.0.0",
-  "--port",
-  "8080",
-]);
+const viteBin = path.join(root, "node_modules", "vite", "bin", "vite.js");
+const vite = spawnChild(process.execPath, [viteBin]);
 vite.on("exit", (code) => shutdown(code ?? 0));
 
 process.on("SIGINT", () => shutdown(0));

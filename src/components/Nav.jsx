@@ -29,10 +29,7 @@ export function Nav() {
           </a>
         </div>
         <div className="flex items-center gap-3">
-          <a href="/webllm-test.html" className="hidden sm:inline-flex hover:text-volt transition font-mono text-[12px] uppercase tracking-wider">
-            WebLLM Test ↗
-          </a>
-          <a href="#lab" className="hidden sm:inline-flex items-center gap-2 bg-volt text-ink-950 font-semibold text-sm px-4 py-2 rounded-md hover:bg-emerald-300 transition">
+          <a href="#top" className="hidden sm:inline-flex items-center gap-2 bg-volt text-ink-950 font-semibold text-sm px-4 py-2 rounded-md hover:bg-emerald-300 transition">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <path d="M5 12h14M13 6l6 6-6 6" />
             </svg>
@@ -70,7 +67,7 @@ export function Nav() {
         <a href="#api" className="block hover:text-volt" onClick={close}>
           API
         </a>
-        <a href="#lab" className="block text-volt font-semibold" onClick={close}>
+        <a href="#top" className="block text-volt font-semibold" onClick={close}>
           Iniciar motor →
         </a>
       </div>

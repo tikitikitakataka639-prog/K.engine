@@ -1,4 +1,8 @@
+import { StartPanel } from "./StartPanel";
+import { useEngine } from "../engine/EngineProvider";
+
 export function Hero() {
+  const { statusLines, kernelUrl } = useEngine();
   return (
     <section id="top" className="grid-bg scan-line pt-32 pb-20 lg:pt-40 lg:pb-28 border-b border-ink-700">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 grid lg:grid-cols-12 gap-12 items-center">
@@ -12,13 +16,8 @@ export function Hero() {
             Sin OpenAI, sin Gemini, sin Claude, sin créditos, sin respuestas simuladas. Descarga el modelo MLC una vez, guárdalo en caché y
             genera streaming real desde tu GPU.
           </p>
-          <div className="mt-8 flex flex-wrap gap-4">
-            <a href="#lab" className="inline-flex items-center gap-2 bg-volt text-ink-950 font-semibold px-6 py-3 rounded-md hover:bg-emerald-300 transition">
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <path d="M5 12h14M13 6l6 6-6 6" />
-              </svg>
-              DESCARGAR MODELO
-            </a>
+          <StartPanel />
+          <div className="mt-6">
             <a
               href="#engine"
               className="inline-flex items-center gap-2 border border-ink-500 text-slate-300 font-medium px-6 py-3 rounded-md hover:border-volt hover:text-volt transition font-mono text-sm uppercase tracking-wider"
@@ -49,25 +48,20 @@ export function Hero() {
               <span className="w-2.5 h-2.5 rounded-full bg-volt/70" />
               <span className="ml-3 font-mono text-[11px] text-slate-500 uppercase tracking-widest">k.engine — engine.status</span>
             </div>
-            <pre className="font-mono text-[12.5px] leading-relaxed p-5 text-slate-300 overflow-x-auto">
+            <pre data-testid="hero-status" className="font-mono text-[12.5px] leading-relaxed p-5 text-slate-300 overflow-x-auto">
               <span className="text-slate-600">$</span> kengine status
               {"\n\n"}
-              <span className="text-volt">ENGINE</span>          ONLINE
+              <span className="text-volt">ENGINE</span>          {statusLines.engine}
               {"\n"}
-              <span className="text-volt">BACKEND</span>          WebLLM (activo)
+              <span className="text-volt">BACKEND</span>          WebLLM
               {"\n"}
-              <span className="text-volt">DEVICE</span>            [GPU] via WebGPU
+              <span className="text-volt">WEBGPU</span>           {statusLines.webgpu}
               {"\n"}
-              <span className="text-volt">MODEL</span>             Llama-3.2-1B-Instruct
-              {"\n"}                  q4f16_1-MLC
-              {"\n"}
-              <span className="text-volt">STATUS</span>            NOT_INSTALLED → READY
+              <span className="text-volt">MODEL</span>             {statusLines.model}
               {"\n"}
               <span className="text-volt">PERSONALITY</span>       KERNEL
               {"\n"}
-              <span className="text-volt">MODE</span>              ISOLATED
-              {"\n"}
-              <span className="text-volt">CRÉDITOS</span>          <span className="text-red2">0 · no aplica</span>
+              <span className="text-volt">KERNEL URL</span>        {kernelUrl || "— (sin definir)"}
             </pre>
           </div>
         </div>

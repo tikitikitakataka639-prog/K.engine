@@ -1,34 +1,26 @@
-# K.ENGINE 1.2.0
+# K.ENGINE 1.3.0
 
-Motor de respuesta independiente para KERNEL. KERNEL solo habla con la API HTTP; no sabe qué hay detrás.
-
-La interfaz se sirve como **React + Vite**. El motor sigue siendo `server.js` (Node). React no es el motor.
+Motor de respuesta independiente para KERNEL. Inferencia **100% local en el navegador** (WebLLM + WebGPU); KERNEL solo habla con la API HTTP.
 
 ```
-KERNEL → HTTP API (server.js) → backend de inferencia → modelo → K.ENGINE → KERNEL
-                                 ├─ "openai-compatible": server/inference.js → KENGINE_BASE_URL (Ollama, LM Studio, vLLM…)
-                                 └─ "webllm": server/browser-bridge.js → pestaña K.ENGINE abierta → WebLLM → WebGPU
+main → EngineProvider → ModelManager → Web Worker → @mlc-ai/web-llm → WebGPU → modelo local
 ```
+
+Flujo de uso: **INICIAR MOTOR** → *INTRODUCIR URL DE K.E.R.N.E.L* (opcional, solo se guarda en tu navegador) → detección WebGPU → catálogo (derivado de `prebuiltAppConfig.model_list`) → **DESCARGAR** (% real) → READY → laboratorio con la personalidad de KERNEL → **LIBERAR MEMORIA** (conserva los datos) / **FORMATEAR MODELO** (borra los datos de ese modelo, con confirmación).
+
+Requisitos del navegador: WebGPU (Chrome/Edge 113+), contexto seguro (`https://` o `localhost`), `shader-f16` para los modelos q4f16. Los pesos se descargan de Hugging Face (y la librería WASM de GitHub) la primera vez; la inferencia nunca sale del equipo.
 
 ```
 K.ENGINE
-│
-├── frontend (React + Vite)     src/ · index.html · vite.config.ts
-├── server.js                   API /health /models /chat + estáticos de dist/
-└── server/                     config, persona, context, inference, tools, catalog, browser-bridge
+├── index.html · src/ · public/         UI React + Vite (engine/: ModelManager, hardware, storage; webllm/: worker)
+├── vite.config.ts                      dev :8080, preview :4173, proxy a la API
+├── server.js · server/                 API /health /models /chat /config /bridge (+ sirve dist/ con `npm start`)
+└── tests/                              server.test.js (API simulada) · e2e/ (Playwright, Chromium real)
 ```
-
-Dos backends separados. La respuesta de `/chat` y `/models` indica siempre cuál se usó (`backend`).
-
-| | openai-compatible | webllm |
-|---|---|---|
-| Dónde corre el modelo | proveedor externo | navegador (WebGPU) |
-| Requisito | `KENGINE_BASE_URL` + `KENGINE_MODEL` | pestaña de la UI abierta con un modelo en READY |
-| Streaming | SSE del proveedor; si no lo soporta, respuesta completa en un solo `delta` | token a token |
 
 ## Instalación y arranque
 
-Node ≥ 18.
+Node ≥ 20.
 
 ```bash
 npm install
@@ -69,7 +61,7 @@ npm run build
 npm start
 ```
 
-`server.js` sirve `dist/` (la UI de React) junto a la API. La prueba aislada de WebLLM queda en `/webllm-test.html`.
+`server.js` sirve `dist/` (la UI de React) junto a la API. `npm run preview` sirve el build en :4173 (con proxy a la API si `server.js` está en marcha).
 
 **Producción:** `KENGINE_ENV=production` exige `KENGINE_AUTH_TOKEN`; `KENGINE_HOST` distinto de localhost también. Pon HTTPS delante (proxy inverso). WebGPU/Cache API de la UI requieren contexto seguro (https o localhost).
 
@@ -115,7 +107,7 @@ Ver `.env.example`. Principales: `KENGINE_BASE_URL`, `KENGINE_API_KEY`, `KENGINE
 
 ## WebLLM en el navegador
 
-Worker con `@mlc-ai/web-llm@0.2.79`; los IDs se validan contra `prebuiltAppConfig.model_list` (catálogo del servidor: `server/catalog.js`; de la UI: `src/webllm/catalog.js`). Panel **Control** de la UI: estado real, selección de modelo según WebGPU/`shader-f16`, backend y caché.
+Worker con `@mlc-ai/web-llm@0.2.79`; los IDs se validan contra `prebuiltAppConfig.model_list` (catálogo del servidor: `server/catalog.js`; la UI deriva su catálogo directamente de WebLLM en `src/engine/models.js`). Panel **Control** de la UI: estado real, compatibilidad de modelos según WebGPU/`shader-f16`, backend y diagnóstico de caché.
 
 Modelo prioritario: `mlc-ai/Llama-3.2-1B-Instruct-q4f16_1-MLC` (ID de API `llama-3.2-1b`, ID WebLLM `Llama-3.2-1B-Instruct-q4f16_1-MLC`).
 
