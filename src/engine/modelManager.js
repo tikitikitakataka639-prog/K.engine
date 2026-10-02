@@ -2,7 +2,7 @@
 //   - es dueña del Worker (donde corre WebLLM) y del estado por modelo;
 //   - comprueba/borra datos con las funciones de WebLLM (hasModelInCache, deleteModelAllInfoInCache);
 //   - los componentes solo leen el estado (getSnapshot) y llaman a estas acciones.
-// Estados por modelo: CHECKING · NOT_DOWNLOADED · DOWNLOADED (en disco, no en memoria) · DOWNLOADING · LOADING ·
+// Estados por modelo: CHECKING · CANCELLED · NOT_DOWNLOADED · DOWNLOADED (en disco, no en memoria) · DOWNLOADING · LOADING ·
 //   VERIFYING · READY · GENERATING · UNLOADING · DELETING · ERROR
 import { loadCatalog, loadWebLLM, DEFAULT_MODEL_ID } from "./models";
 import { classifyModel } from "./hardware";
@@ -210,6 +210,14 @@ class ModelManager {
     this.#finishOp({ ok: false, error: message });
     if (!keepLoaded) this.refreshCacheAfterError(op.id);
   }
+  async refreshCacheKeepCancelled(id) {
+    try {
+      const webllm = await loadWebLLM();
+      this.#patchModel(id, { cached: await webllm.hasModelInCache(id, webllm.prebuiltAppConfig) });
+    } catch {
+      /* mantiene CANCELLED */
+    }
+  }
   async refreshCacheAfterError(id) {
     try {
       const webllm = await loadWebLLM();
@@ -253,8 +261,8 @@ class ModelManager {
     const id = this.op.id;
     this.#killWorker();
     this.#finishOp({ ok: false, error: "cancelado" });
-    this.#patchModel(id, { status: "NOT_DOWNLOADED", progress: null, text: "", error: "Descarga cancelada. Lo ya descargado se conserva en caché." });
-    this.refreshCache(id);
+    this.#patchModel(id, { status: "CANCELLED", progress: null, text: "", error: "Descarga cancelada. Lo ya descargado se conserva en caché." });
+    this.refreshCacheKeepCancelled(id);
   }
 
   /** LIBERAR MEMORIA: descarga el modelo de la GPU/RAM pero conserva los datos en disco. */

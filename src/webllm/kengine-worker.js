@@ -27,62 +27,163 @@ function phaseOf(p) {
   return p.progress >= 1 ? "LOADING" : "DOWNLOADING";
 }
 
+/** Valida la respuesta HTTP ANTES de que llegue a Cache API. Solo para recursos que K.ENGINE descarga directamente. */
+async function fetchForCache(url, options = {}) {
+  const response = await fetch(url, { ...options, cache: "no-store", redirect: "follow" });
+  if (!response.ok) {
+    throw new Error(`Model resource HTTP ${response.status}: ${response.statusText} — ${url}`);
+  }
+  if (!response.body && !response.clone) {
+    throw new Error(`Invalid response received for model resource: ${url}`);
+  }
+  return response;
+}
+
+const RETRY_DELAYS = [1000, 2500]; // espera tras el intento 1 y 2 (máx. 3 intentos)
+const MAX_ATTEMPTS = 3;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const post = (m) => self.postMessage(m);
+
+/** Errores transitorios de red/caché: los únicos que se reintentan. */
+function isTransient(err) {
+  const t = String((err && err.message) || err).toLowerCase();
+  return /network|cache\.add|cache\.put|cachestorage|failed to fetch|fetch|http 5\d\d|http 4(08|29)|timeout|quota|load failed|econn/.test(t);
+}
+
+/** Prefijo de URL del modelo (misma normalización que cleanModelUrl de WebLLM). */
+function modelPrefix(record) {
+  let prefix = String(record.model);
+  if (!prefix.endsWith("/")) prefix += "/";
+  if (!prefix.includes("/resolve/")) prefix += "resolve/main/";
+  return prefix;
+}
+
+/** Borra SOLO las entradas del modelo indicado en webllm/model. Nunca caches.delete() ni otros modelos. */
+async function cleanPartialModel(record) {
+  const prefix = modelPrefix(record);
+  let removed = 0;
+  try {
+    const cache = await caches.open("webllm/model");
+    for (const req of await cache.keys()) {
+      if (req.url.startsWith(prefix) && (await cache.delete(req))) removed++;
+    }
+  } catch (e) {
+    console.error("[K.ENGINE] No se pudo limpiar el estado parcial de " + record.model_id, e);
+  }
+  return removed;
+}
+
+function describeDownloadError(modelId, attempts, err) {
+  const original = String((err && err.message) || err);
+  const isCacheAdd = /cache\.add|cache\.put/i.test(original);
+  return (
+    "ERROR DE DESCARGA\n\n" +
+    (isCacheAdd ? "No se pudo almacenar uno de los archivos del modelo." : "No se pudo descargar o almacenar el modelo.") +
+    "\n\nSe ha limpiado el estado parcial y puedes reintentar.\n\nModelo: " +
+    modelId +
+    "\nIntentos: " +
+    attempts +
+    "\nERROR ORIGINAL: " +
+    original
+  );
+}
+
+/** Comprobaciones previas: modelo real, WebGPU y shader-f16. Lanza Error con mensaje claro. */
+async function validateEnvironment(modelId) {
+  const record = getWebLLMModel(modelId);
+  if (!self.navigator || !self.navigator.gpu) throw new Error("WebGPU (navigator.gpu) no está disponible dentro del worker.");
+  const needsF16 = (record.required_features || []).includes("shader-f16") || /q4f16|q0f16/.test(modelId);
+  const adapter = await self.navigator.gpu.requestAdapter();
+  if (!adapter) throw new Error("WebGPU no devolvió ningún adaptador.");
+  if (needsF16 && !adapter.features.has("shader-f16")) {
+    throw new Error("El modelo " + modelId + " requiere shader-f16 y este adaptador no lo expone.");
+  }
+  return record;
+}
+
+let currentLoad = null; // modelId en curso: impide CreateMLCEngine simultáneos
+
+/** Valida → descarga/carga con CreateMLCEngine (progreso REAL) → reintenta errores de red/caché → limpia parciales. */
+async function loadModelWithRetry(modelId, options = {}) {
+  const { maxAttempts = MAX_ATTEMPTS } = options;
+  if (currentLoad) throw Object.assign(new Error("Ya hay una carga en curso (" + currentLoad + ")."), { fatal: true });
+  currentLoad = modelId;
+  try {
+    post({ type: "MODEL_STATE", modelId, state: "VALIDATING" });
+    const record = await validateEnvironment(modelId);
+    let lastErr = null;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        post({ type: "status", value: "DOWNLOADING" });
+        post({ type: "MODEL_STATE", modelId, state: "DOWNLOADING", attempt });
+        // Pre-vuelo con respuesta validada: un 4xx/5xx da un error claro antes de que WebLLM toque Cache API.
+        await fetchForCache(modelPrefix(record) + "mlc-chat-config.json");
+        const eng = await CreateMLCEngine(record.model_id, {
+          appConfig: prebuiltAppConfig,
+          initProgressCallback: (p) => {
+            const phase = phaseOf(p);
+            const progress = p.progress || 0;
+            post({ type: "progress", progress, text: p.text || "", phase });
+            post({ type: "MODEL_PROGRESS", modelId, progress: Math.round(progress * 100), text: p.text || "" });
+            if (phase === "LOADING") post({ type: "MODEL_STATE", modelId, state: "LOADING" });
+          },
+        });
+        return { engine: eng, record, attempts: attempt };
+      } catch (err) {
+        lastErr = err;
+        console.error("[K.ENGINE] Intento " + attempt + "/" + maxAttempts + " falló para " + modelId + ":", err);
+        if (!isTransient(err)) throw Object.assign(err, { attempts: attempt });
+        if (attempt < maxAttempts) {
+          post({ type: "MODEL_STATE", modelId, state: "RETRYING", attempt, text: "Reintentando en " + RETRY_DELAYS[attempt - 1] + " ms…" });
+          await sleep(RETRY_DELAYS[attempt - 1]);
+        }
+      }
+    }
+    const removed = await cleanPartialModel(record);
+    console.error("[K.ENGINE] Descarga fallida tras " + maxAttempts + " intentos; entradas parciales eliminadas: " + removed, lastErr);
+    throw Object.assign(new Error(describeDownloadError(modelId, maxAttempts, lastErr)), { attempts: maxAttempts, original: lastErr });
+  } finally {
+    currentLoad = null;
+  }
+}
+
 self.onmessage = async (e) => {
   const msg = e.data;
   try {
     if (msg.type === "load") {
-      let record;
-      try {
-        record = getWebLLMModel(msg.model);
-      } catch (vErr) {
-        self.postMessage({ type: "error", scope: "load", message: String(vErr.message || vErr) });
-        return;
-      }
-      if (!self.navigator || !self.navigator.gpu) {
-        self.postMessage({ type: "error", scope: "load", message: "WebGPU (navigator.gpu) no está disponible dentro del worker." });
-        return;
-      }
       if (loading) {
-        self.postMessage({ type: "error", scope: "load", message: "Ya hay una carga en curso." });
+        post({ type: "error", scope: "load", message: "Ya hay una carga en curso." });
         return;
       }
       if (generating) {
-        self.postMessage({ type: "error", scope: "load", message: "Generación en curso; no se puede cargar otro modelo." });
+        post({ type: "error", scope: "load", message: "Generación en curso; no se puede cargar otro modelo." });
         return;
       }
       if (engine && loadedModel === msg.model) {
-        self.postMessage({ type: "ready", model: msg.model, cached: true });
+        post({ type: "ready", model: msg.model, cached: true });
         return;
       }
       loading = true;
       try {
         if (engine) {
-          self.postMessage({ type: "status", value: "UNLOADING" });
+          post({ type: "status", value: "UNLOADING" });
           await engine.unload();
           engine = null;
           loadedModel = null;
         }
-        self.postMessage({ type: "status", value: "DOWNLOADING" });
         try {
-          engine = await CreateMLCEngine(record.model_id, {
-            appConfig: prebuiltAppConfig,
-            initProgressCallback: (p) => {
-              self.postMessage({ type: "progress", progress: p.progress || 0, text: p.text || "", phase: phaseOf(p) });
-            },
-          });
+          const res = await loadModelWithRetry(msg.model);
+          engine = res.engine;
         } catch (loadErr) {
           engine = null;
-          self.postMessage({
-            type: "error",
-            scope: "load",
-            message:
-              "CreateMLCEngine falló para " + record.model_id + ".\nERROR ORIGINAL: " + String((loadErr && loadErr.message) || loadErr),
-          });
+          const m = String((loadErr && loadErr.message) || loadErr);
+          post({ type: "MODEL_STATE", modelId: msg.model, state: "ERROR" });
+          post({ type: "error", scope: "load", message: m.startsWith("ERROR DE DESCARGA") ? m : "CreateMLCEngine falló para " + msg.model + ".\nERROR ORIGINAL: " + m });
           return;
         }
         loadedModel = msg.model;
         // Verificación real: una generación mínima antes de declarar READY.
-        self.postMessage({ type: "status", value: "VERIFYING" });
+        post({ type: "status", value: "VERIFYING" });
         const t0 = performance.now();
         const out = await engine.chat.completions.create({
           messages: [{ role: "user", content: "Responde únicamente con la palabra: ok" }],
@@ -92,7 +193,8 @@ self.onmessage = async (e) => {
         });
         const text = out.choices[0]?.message?.content || "";
         if (!text) throw new Error("La verificación de generación no devolvió texto.");
-        self.postMessage({ type: "verified", model: msg.model, ms: Math.round(performance.now() - t0) });
+        post({ type: "MODEL_READY", modelId: msg.model });
+        post({ type: "verified", model: msg.model, ms: Math.round(performance.now() - t0) });
       } finally {
         loading = false;
       }
