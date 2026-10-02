@@ -5,9 +5,8 @@ const ITEMS = [
     q: "¿Necesito subir algún archivo del modelo?",
     a: (
       <>
-        No. Al pulsar DESCARGAR MODELO, WebLLM descarga los archivos MLC oficiales desde Hugging Face (
-        <span className="font-mono">mlc-ai/Llama-3.2-1B-Instruct-q4f16_1-MLC</span>) y los guarda en la caché del navegador. En visitas posteriores: CACHE
-        FOUND, sin volver a descargar.
+        No. Al pulsar DESCARGAR, WebLLM descarga los archivos MLC oficiales desde Hugging Face (
+        <span className="font-mono">mlc-ai/Llama-3.2-1B-Instruct-q4f16_1-MLC</span>) y los guarda en la caché del navegador. En visitas posteriores el modelo aparece como DESCARGADO y solo hay que cargarlo, sin volver a descargar.
       </>
     ),
   },

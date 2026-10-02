@@ -1,93 +1,35 @@
-// Versión FIJADA para reproducibilidad del diagnóstico (no "latest").
-// esm.run (jsDelivr "+esm") puede lanzar "TypeError: Invalid URL" al
-// evaluar el bundle; se usa el paquete npm primero, luego esm.sh y el build ESM oficial como
-// fallback, probando cada fuente hasta que una exporte la API esperada.
-const WEBLLM_SOURCES = [
-  "https://esm.sh/@mlc-ai/web-llm@0.2.79",
-  "https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.79/lib/index.js",
-  "https://esm.run/@mlc-ai/web-llm@0.2.79",
-];
-let webllm = null;
-try {
-  const mod = await import("@mlc-ai/web-llm");
-  if (mod && mod.prebuiltAppConfig && mod.CreateMLCEngine) webllm = mod;
-} catch (e) {
-  console.error("[KERNEL WebLLM] Fallo importando paquete npm @mlc-ai/web-llm@0.2.79 →", e);
-}
-if (!webllm) {
-  for (const src of WEBLLM_SOURCES) {
-    try {
-      const mod = await import(/* @vite-ignore */ src);
-      if (mod && mod.prebuiltAppConfig && mod.CreateMLCEngine) {
-        webllm = mod;
-        break;
-      }
-    } catch (e) {
-      console.error("[KERNEL WebLLM] Fallo importando " + src + " →", e);
-    }
-  }
-}
-if (!webllm) {
-  self.postMessage({
-    type: "error",
-    scope: "load",
-    message:
-      "No se pudo importar @mlc-ai/web-llm@0.2.79 desde el paquete npm ni desde ningún CDN. Prueba:\n" +
-      ["@mlc-ai/web-llm@0.2.79", ...WEBLLM_SOURCES].join("\n"),
-  });
-}
-
-/* Sin interceptor de Cache API: WebLLM usa la implementación nativa del navegador. */
+// Worker de K.ENGINE: aquí vive WebLLM (dependencia npm empaquetada por Vite; sin CDN).
+// Flujo: main → EngineProvider → ModelManager → este Worker → @mlc-ai/web-llm → WebGPU.
+import { prebuiltAppConfig, CreateMLCEngine } from "@mlc-ai/web-llm";
 
 let engine = null;
 let loadedModel = null;
 let generating = false;
+let loading = false;
 
-const MODEL_LIST = webllm ? webllm.prebuiltAppConfig.model_list : [];
+const MODEL_LIST = prebuiltAppConfig.model_list;
 const AVAILABLE_IDS = MODEL_LIST.map((m) => m.model_id);
 
-/* ============================================================
-   FUENTE ÚNICA DE VERDAD: prebuiltAppConfig.model_list.
-   No hay configuración duplicada, ni URLs manuales, ni
-   descarga manual con fetch()/Cache.add(). WebLLM gestiona
-   sus propios artefactos y su propia caché.
-   ============================================================ */
-
-/**
- * Validación obligatoria antes de CreateMLCEngine:
- * nunca intentar cargar un model_id que no exista en
- * prebuiltAppConfig.model_list de la versión instalada.
- */
+/** Fuente única de verdad: prebuiltAppConfig.model_list. Nunca se carga un ID que no esté ahí. */
 function getWebLLMModel(modelId) {
-  if (!webllm) {
-    throw new Error("WebLLM no está disponible en el worker.");
-  }
   const model = MODEL_LIST.find((item) => item.model_id === modelId) || null;
   if (!model) {
-    throw new Error(
-      "Modelo no disponible en esta versión de WebLLM: " + modelId + ". Disponibles: " + AVAILABLE_IDS.join(", "),
-    );
+    throw new Error("Modelo no disponible en esta versión de WebLLM: " + modelId + " (" + AVAILABLE_IDS.length + " modelos conocidos).");
   }
   return model;
+}
+
+/** Fase real según el texto que emite WebLLM en initProgressCallback. */
+function phaseOf(p) {
+  const t = (p.text || "").toLowerCase();
+  if (t.includes("fetching")) return "DOWNLOADING";
+  if (t.includes("loading model from cache") || t.includes("loading gpu shader") || t.includes("finish loading")) return "LOADING";
+  return p.progress >= 1 ? "LOADING" : "DOWNLOADING";
 }
 
 self.onmessage = async (e) => {
   const msg = e.data;
   try {
-    if (msg.type === "models") {
-      self.postMessage({
-        type: "models",
-        ids: AVAILABLE_IDS,
-        records: MODEL_LIST.map((m) => ({
-          id: m.model_id,
-          vram_required_MB: m.vram_required_MB ?? null,
-          low_resource_required: m.low_resource_required ?? null,
-          url: m.model,
-        })),
-      });
-      return;
-    }
-
     if (msg.type === "load") {
       let record;
       try {
@@ -96,13 +38,14 @@ self.onmessage = async (e) => {
         self.postMessage({ type: "error", scope: "load", message: String(vErr.message || vErr) });
         return;
       }
-
-      console.log("[KERNEL] Modelo WebLLM seleccionado:", {
-        model_id: record.model_id,
-        model_lib: record.model_lib,
-        model_url: record.model,
-      });
-      console.log("[KERNEL WebLLM] version:", webllm.version || "N/A (worker module)", "· Online:", navigator.onLine);
+      if (!self.navigator || !self.navigator.gpu) {
+        self.postMessage({ type: "error", scope: "load", message: "WebGPU (navigator.gpu) no está disponible dentro del worker." });
+        return;
+      }
+      if (loading) {
+        self.postMessage({ type: "error", scope: "load", message: "Ya hay una carga en curso." });
+        return;
+      }
       if (generating) {
         self.postMessage({ type: "error", scope: "load", message: "Generación en curso; no se puede cargar otro modelo." });
         return;
@@ -111,57 +54,48 @@ self.onmessage = async (e) => {
         self.postMessage({ type: "ready", model: msg.model, cached: true });
         return;
       }
-      if (engine) {
-        self.postMessage({ type: "status", value: "UNLOADING" });
-        await engine.unload();
-        engine = null;
-        loadedModel = null;
-      }
-      self.postMessage({ type: "status", value: "DOWNLOADING" });
-
+      loading = true;
       try {
-        engine = await webllm.CreateMLCEngine(record.model_id, {
-          appConfig: webllm.prebuiltAppConfig,
-          initProgressCallback: (p) => {
-            console.log("[KERNEL WebLLM]", p.text, Math.round((p.progress || 0) * 100) + "%");
-            self.postMessage({
-              type: "progress",
-              progress: p.progress || 0,
-              text: p.text || "",
-              phase: p.progress && p.progress >= 1 ? "LOADING" : "DOWNLOADING",
-            });
-          },
+        if (engine) {
+          self.postMessage({ type: "status", value: "UNLOADING" });
+          await engine.unload();
+          engine = null;
+          loadedModel = null;
+        }
+        self.postMessage({ type: "status", value: "DOWNLOADING" });
+        try {
+          engine = await CreateMLCEngine(record.model_id, {
+            appConfig: prebuiltAppConfig,
+            initProgressCallback: (p) => {
+              self.postMessage({ type: "progress", progress: p.progress || 0, text: p.text || "", phase: phaseOf(p) });
+            },
+          });
+        } catch (loadErr) {
+          engine = null;
+          self.postMessage({
+            type: "error",
+            scope: "load",
+            message:
+              "CreateMLCEngine falló para " + record.model_id + ".\nERROR ORIGINAL: " + String((loadErr && loadErr.message) || loadErr),
+          });
+          return;
+        }
+        loadedModel = msg.model;
+        // Verificación real: una generación mínima antes de declarar READY.
+        self.postMessage({ type: "status", value: "VERIFYING" });
+        const t0 = performance.now();
+        const out = await engine.chat.completions.create({
+          messages: [{ role: "user", content: "Responde únicamente con la palabra: ok" }],
+          max_tokens: 8,
+          temperature: 0,
+          stream: false,
         });
-      } catch (loadErr) {
-        console.error("[KERNEL WebLLM] Error real:", loadErr);
-        self.postMessage({
-          type: "error",
-          scope: "load",
-          message:
-            "CreateMLCEngine falló para " +
-            record.model_id +
-            " (model_url: " +
-            record.model +
-            ").\nERROR ORIGINAL: " +
-            String((loadErr && loadErr.message) || loadErr) +
-            (loadErr && loadErr.stack ? "\nSTACK: " + loadErr.stack : ""),
-        });
-        throw loadErr;
+        const text = out.choices[0]?.message?.content || "";
+        if (!text) throw new Error("La verificación de generación no devolvió texto.");
+        self.postMessage({ type: "verified", model: msg.model, ms: Math.round(performance.now() - t0) });
+      } finally {
+        loading = false;
       }
-      loadedModel = msg.model;
-      self.postMessage({ type: "status", value: "DOWNLOADED" });
-
-      self.postMessage({ type: "status", value: "GENERATING" });
-      const t0 = performance.now();
-      const chunks = await engine.chat.completions.create({
-        messages: [{ role: "user", content: "Responde únicamente con la palabra: ok" }],
-        max_tokens: 8,
-        temperature: 0,
-        stream: false,
-      });
-      const text = chunks.choices[0]?.message?.content || "";
-      if (!text) throw new Error("La verificación de generación no devolvió texto.");
-      self.postMessage({ type: "verified", model: msg.model, ms: Math.round(performance.now() - t0) });
     } else if (msg.type === "generate") {
       if (!engine || loadedModel !== msg.model) {
         self.postMessage({ type: "error", scope: "generate", message: "El modelo no está cargado." });
