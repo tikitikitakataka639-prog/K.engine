@@ -12,7 +12,7 @@ export function ModelLab() {
   const cls = classes[id];
   const [, label] = STATUS_LABELS[m.status] || STATUS_LABELS.NOT_DOWNLOADED;
   const started = startPhase === "RUNNING";
-  const inMemory = m.status === "READY" || m.status === "GENERATING";
+  const inMemory = m.status === "READY" || m.status === "GENERATING" || m.status === "CANCELLING";
   const working = ["DOWNLOADING", "LOADING", "VERIFYING", "UNLOADING", "DELETING"].includes(m.status);
   const percent = pct(m.progress);
   const mainLabel = !started
@@ -23,7 +23,9 @@ export function ModelLab() {
         ? "CARGANDO " + (percent ?? 0) + "%"
         : m.status === "VERIFYING"
           ? "VERIFICANDO"
-          : inMemory
+          : m.status === "INCOMPATIBLE"
+            ? "NO COMPATIBLE"
+            : inMemory
             ? "READY"
             : m.status === "DOWNLOADED"
               ? "CARGAR MODELO"

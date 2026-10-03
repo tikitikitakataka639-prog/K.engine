@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { KERNEL_PERSONALITY } from "./personality";
 import { modelManager, IN_MEMORY } from "./modelManager";
 import { detectHardware, emptyHardware, CLASS } from "./hardware";
+import { autoSelectModel } from "./models";
 import { getSetting, setSetting, loadChat, saveChat, clearChat } from "./storage";
 import { api, probeApi, tokenGet, tokenSet } from "../api/client";
 import { scanCaches, cacheApiSelfTest, classify as classifyDiag, formatCacheSummary, storageEstimateLine, fmtBytes } from "../api/cache";
@@ -213,6 +214,13 @@ export function EngineProvider({ children }) {
       setHardware(hw);
       modelManager.setHardware(hw, { vramGB: manualVram || null });
       await modelManager.init();
+      // Selección automática del mejor modelo compatible
+      const snap0 = modelManager.getSnapshot();
+      const best = autoSelectModel(hw, snap0.catalog, { vramGB: manualVram || null });
+      if (best && best !== snap0.selectedId) {
+        modelManager.select(best);
+        setSetting("selectedModel", best);
+      }
       await Promise.all(modelManager.getSnapshot().catalog.featured.map((m) => modelManager.refreshCache(m.id)));
       keRef.current.started = true;
       setStartPhase("RUNNING");

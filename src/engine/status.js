@@ -10,7 +10,9 @@ export const STATUS_LABELS = {
   GENERATING: ["bg-volt blinking", "GENERANDO"],
   UNLOADING: ["bg-amber2 blinking", "LIBERANDO MEMORIA"],
   DELETING: ["bg-amber2 blinking", "ELIMINANDO DATOS"],
+  CANCELLING: ["bg-amber2 blinking", "CANCELANDO"],
   ERROR: ["bg-red2", "ERROR"],
+  INCOMPATIBLE: ["bg-red2", "NO COMPATIBLE"],
 };
 
 export const CLASS_STYLE = {

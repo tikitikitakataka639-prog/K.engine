@@ -27,6 +27,36 @@ function phaseOf(p) {
   return p.progress >= 1 ? "LOADING" : "DOWNLOADING";
 }
 
+/** Detecta si un error parece de Cache API o red (recuperable limpiando caché). */
+function isCacheError(msg) {
+  const m = String(msg || "").toLowerCase();
+  return (
+    m.includes("cache") ||
+    m.includes("failed to execute 'add'") ||
+    m.includes("unexpected internal error") ||
+    m.includes("network error") ||
+    (m.includes("fetch") && !m.includes("fetching"))
+  );
+}
+
+/** Limpia solo las entradas de Cache API de un modelo concreto. No toca otras cachés ni IndexedDB. */
+async function cleanModelCacheInWorker(record) {
+  let prefix = String(record.model);
+  if (!prefix.endsWith("/")) prefix += "/";
+  if (!prefix.includes("/resolve/")) prefix += "resolve/main/";
+  try {
+    const cache = await caches.open("webllm/model");
+    const keys = await cache.keys();
+    const toDelete = keys.filter((r) => r.url.startsWith(prefix));
+    await Promise.all(toDelete.map((r) => cache.delete(r)));
+    const jsonUrl = new URL("ndarray-cache.json", prefix).href;
+    await cache.delete(jsonUrl);
+    return toDelete.length;
+  } catch {
+    return 0;
+  }
+}
+
 self.onmessage = async (e) => {
   const msg = e.data;
   try {
@@ -63,6 +93,7 @@ self.onmessage = async (e) => {
           loadedModel = null;
         }
         self.postMessage({ type: "status", value: "DOWNLOADING" });
+        let loadError = null;
         try {
           engine = await CreateMLCEngine(record.model_id, {
             appConfig: prebuiltAppConfig,
@@ -71,12 +102,32 @@ self.onmessage = async (e) => {
             },
           });
         } catch (loadErr) {
+          loadError = loadErr;
+        }
+        // Recuperación de caché corrupta: si el error parece de Cache API o red,
+        // se limpian solo las entradas de este modelo y se reintenta una vez.
+        if (loadError && isCacheError(loadError.message || loadError)) {
+          self.postMessage({ type: "progress", progress: 0, text: "Caché corrupta detectada. Limpiando y reintentando…", phase: "DOWNLOADING" });
+          await cleanModelCacheInWorker(record);
+          try {
+            engine = await CreateMLCEngine(record.model_id, {
+              appConfig: prebuiltAppConfig,
+              initProgressCallback: (p) => {
+                self.postMessage({ type: "progress", progress: p.progress || 0, text: p.text || "", phase: phaseOf(p) });
+              },
+            });
+            loadError = null;
+          } catch (retryErr) {
+            loadError = retryErr;
+          }
+        }
+        if (loadError) {
           engine = null;
           self.postMessage({
             type: "error",
             scope: "load",
             message:
-              "CreateMLCEngine falló para " + record.model_id + ".\nERROR ORIGINAL: " + String((loadErr && loadErr.message) || loadErr),
+              "CreateMLCEngine falló para " + record.model_id + ".\nERROR ORIGINAL: " + String((loadError && loadError.message) || loadError),
           });
           return;
         }

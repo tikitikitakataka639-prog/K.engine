@@ -4,12 +4,13 @@
 //   - los componentes solo leen el estado (getSnapshot) y llaman a estas acciones.
 // Estados por modelo: CHECKING · NOT_DOWNLOADED · DOWNLOADED (en disco, no en memoria) · DOWNLOADING · LOADING ·
 //   VERIFYING · READY · GENERATING · UNLOADING · DELETING · ERROR
-import { loadCatalog, loadWebLLM, DEFAULT_MODEL_ID } from "./models";
+import { loadCatalog, loadWebLLM, DEFAULT_MODEL_ID, autoSelectModel } from "./models";
 import { classifyModel } from "./hardware";
 import { saveModelMeta, deleteModelMeta } from "./storage";
+import { classifyError } from "./errors";
 
 export const ACTIVE = ["DOWNLOADING", "LOADING", "VERIFYING", "UNLOADING", "DELETING"]; // operaciones en curso
-export const IN_MEMORY = ["READY", "GENERATING"];
+export const IN_MEMORY = ["READY", "GENERATING", "CANCELLING"];
 
 const blankModel = () => ({ status: "CHECKING", cached: null, progress: null, text: "", error: null, lastAction: null });
 
@@ -95,10 +96,19 @@ class ModelManager {
     return m ? classifyModel(m, this.hw, this.manual) : null;
   }
 
+  /** Selecciona automáticamente el mejor modelo compatible con el hardware detectado. */
+  autoSelect() {
+    const snap = this.snapshot;
+    if (!this.hw || !this.hw.checked) return null;
+    const best = autoSelectModel(this.hw, snap.catalog, this.manual);
+    if (best) this.select(best);
+    return best;
+  }
+
   /* ---------- comprobación de datos locales ---------- */
   async refreshCache(id) {
     const cur = this.snapshot.models[id];
-    if (cur && (ACTIVE.includes(cur.status) || IN_MEMORY.includes(cur.status))) return;
+    if (cur && (ACTIVE.includes(cur.status) || IN_MEMORY.includes(cur.status) || cur.status === "INCOMPATIBLE")) return;
     this.#patchModel(id, { status: "CHECKING" });
     try {
       const webllm = await loadWebLLM();
@@ -201,13 +211,15 @@ class ModelManager {
       return;
     }
     // Nunca dejamos READY por error: si la carga falló, el modelo no está en memoria.
+    const classified = classifyError(message);
+    const friendly = classified.fullMessage;
     const keepLoaded = fallbackStatus === "READY";
     if (!keepLoaded && op.kind !== "delete") {
       this.#killWorker();
       if (this.snapshot.loadedId === op.id) this.#set({ loadedId: null });
     }
-    this.#patchModel(op.id, { status: keepLoaded ? "READY" : "ERROR", error: message, progress: null });
-    this.#finishOp({ ok: false, error: message });
+    this.#patchModel(op.id, { status: keepLoaded ? "READY" : "ERROR", error: friendly, progress: null });
+    this.#finishOp({ ok: false, error: friendly });
     if (!keepLoaded) this.refreshCacheAfterError(op.id);
   }
   async refreshCacheAfterError(id) {
@@ -232,8 +244,8 @@ class ModelManager {
     if (loaded === id) return Promise.resolve({ ok: true });
     const cls = this.classify(id);
     if (cls && cls.blocking) {
-      const error = "No se intenta cargar " + id + ": " + cls.reasons[0];
-      this.#patchModel(id, { status: "ERROR", error });
+      const error = "No se puede cargar " + id + ": " + cls.reasons[0];
+      this.#patchModel(id, { status: "INCOMPATIBLE", error });
       return Promise.resolve({ ok: false, error });
     }
     if (this.snapshot.models[id]?.status === "GENERATING" || (loaded && this.snapshot.models[loaded]?.status === "GENERATING")) {
@@ -269,6 +281,10 @@ class ModelManager {
   }
 
   cancelGenerate() {
+    const id = this.snapshot.loadedId;
+    if (id && this.snapshot.models[id]?.status === "GENERATING") {
+      this.#patchModel(id, { status: "CANCELLING" });
+    }
     this.post({ type: "cancel" });
   }
 

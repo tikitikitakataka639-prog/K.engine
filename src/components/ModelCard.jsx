@@ -15,7 +15,7 @@ export function ModelCard({ model }) {
   const busyElsewhere = Boolean(opKind) && opId !== model.id;
   const percent = pct(m.progress);
   const selected = selectedId === model.id;
-  const inMemory = m.status === "READY" || m.status === "GENERATING";
+  const inMemory = m.status === "READY" || m.status === "GENERATING" || m.status === "CANCELLING";
   const working = ["DOWNLOADING", "LOADING", "VERIFYING", "UNLOADING", "DELETING"].includes(m.status);
   const hardBlock = cls && cls.level === "NO COMPATIBLE";
   const lastDelete = formatResult && formatResult.id === model.id ? formatResult : null;
@@ -30,6 +30,7 @@ export function ModelCard({ model }) {
   else if (m.status === "ERROR") mainLabel = "REINTENTAR";
   else if (m.status === "UNLOADING") mainLabel = "LIBERANDO…";
   else if (m.status === "DELETING") mainLabel = "ELIMINANDO…";
+  else if (m.status === "INCOMPATIBLE") mainLabel = "NO COMPATIBLE";
   else mainLabel = "DESCARGAR";
 
   const mainDisabled = !started || working || inMemory || busyElsewhere || m.status === "CHECKING" || (cls && cls.blocking);
@@ -53,6 +54,14 @@ export function ModelCard({ model }) {
       </div>
       <h3 className="font-display font-semibold text-lg text-white mt-3">{model.label}</h3>
       <p className="font-mono text-[11px] text-slate-500 mt-1 break-all">{model.id}</p>
+      {model.description ? <p className="mt-2 text-sm text-slate-400 leading-relaxed">{model.description}</p> : null}
+      {model.capabilities?.length ? (
+        <div className="mt-2 flex flex-wrap gap-1">
+          {model.capabilities.map((c) => (
+            <span key={c} className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-ink-700/50 text-slate-400">{c}</span>
+          ))}
+        </div>
+      ) : null}
       <div className="mt-4 flex flex-wrap gap-2 font-mono text-[10px] uppercase tracking-wider">
         <span className="px-2 py-0.5 rounded bg-ink-700 text-slate-300">VRAM ~{fmtMB(model.vramMB)}</span>
         {model.requiredFeatures.map((f) => (
