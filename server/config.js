@@ -4,7 +4,7 @@ const env = process.env;
 const num = (v, d) => (Number.isFinite(Number(v)) && v !== undefined && v !== "" ? Number(v) : d);
 
 const config = {
-  version: "1.2.0",
+  version: "1.3.0",
   env: env.KENGINE_ENV === "production" ? "production" : "development",
   host: env.KENGINE_HOST || "127.0.0.1",
   port: num(env.KENGINE_PORT, 5173),

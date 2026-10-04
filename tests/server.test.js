@@ -30,7 +30,7 @@ up.listen(5999, "127.0.0.1", async () => {
     const g = async (p, o) => { const r = await fetch(B + p, o); return { s: r.status, t: await r.text(), h: r.headers }; };
     const post = (p, b, h = {}) => g(p, { method: "POST", headers: { "Content-Type": "application/json", ...h }, body: typeof b === "string" ? b : JSON.stringify(b) });
     try {
-      let r = await g("/health"); assert.deepStrictEqual(JSON.parse(r.t), { status: "ok", engine: "K.ENGINE", version: "1.2.0" }); ok("GET /health");
+      let r = await g("/health"); assert.deepStrictEqual(JSON.parse(r.t), { status: "ok", engine: "K.ENGINE", version: "1.3.0" }); ok("GET /health");
       r = await g("/models"); let j = JSON.parse(r.t);
       assert(j.models.find(m => m.id === "mock" && m.backend === "openai-compatible" && m.status === "configured" && m.provider_check === "listed"));
       assert(j.models.filter(m => m.backend === "webllm").every(m => m.status === "no_browser_connected")); ok("GET /models (webllm NO se marca ready sin navegador)");

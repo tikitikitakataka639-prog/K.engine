@@ -1,5 +1,5 @@
 "use strict";
-// K.ENGINE 1.2 — API de respuesta + servidor estático de la UI. Sin dependencias (Node >= 18).
+// K.ENGINE 1.3 — API de respuesta + servidor estático de la UI. Sin dependencias (Node >= 18).
 //
 //   KERNEL → HTTP API (este servidor) → backend de inferencia → modelo
 //   Backends:  "openai-compatible" (server/inference.js)  ·  "webllm" (pestaña del navegador, server/browser-bridge.js)

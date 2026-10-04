@@ -43,5 +43,5 @@ export async function loadCatalog() {
   const featured = FEATURED_IDS.filter((id) => byId.has(id)).map((id) => describe(byId.get(id)));
   const missingFeatured = FEATURED_IDS.filter((id) => !byId.has(id));
   const models = list.map(describe);
-  return { models, featured, missingFeatured, version: webllm.version || null, total: list.length };
+  return { models, featured, missingFeatured, version: webllm.version || webllm.modelVersion || null, total: list.length };
 }
