@@ -5,6 +5,7 @@ import { detectHardware, emptyHardware, CLASS } from "./hardware";
 import { getSetting, setSetting, loadChat, saveChat, clearChat } from "./storage";
 import { api, probeApi, tokenGet, tokenSet } from "../api/client";
 import { scanCaches, cacheApiSelfTest, classify as classifyDiag, formatCacheSummary, storageEstimateLine, fmtBytes } from "../api/cache";
+import { parseKernelUrl } from "./kernelUrl";
 
 const EngineContext = createContext(null);
 export function useEngine() {
@@ -28,19 +29,6 @@ const emptyControl = () => ({
   cfgDisabled: false,
   ksBridge: "—",
 });
-
-/** Valida la URL de la interfaz KERNEL. No se inventa ninguna ni se conecta sola. */
-export function parseKernelUrl(raw) {
-  const v = (raw || "").trim();
-  if (!v) return { ok: false, error: "Introduce una URL." };
-  try {
-    const u = new URL(v);
-    if (!/^https?:$/.test(u.protocol)) return { ok: false, error: "Solo se admiten URLs http:// o https://." };
-    return { ok: true, url: u.toString() };
-  } catch {
-    return { ok: false, error: "URL no válida (ejemplo de formato: https://host/ruta)." };
-  }
-}
 
 export function EngineProvider({ children }) {
   const mm = useSyncExternalStore(modelManager.subscribe, modelManager.getSnapshot);
