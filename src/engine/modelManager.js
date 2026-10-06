@@ -102,7 +102,7 @@ class ModelManager {
     this.#patchModel(id, { status: "CHECKING" });
     try {
       const webllm = await loadWebLLM();
-      const cached = await webllm.hasModelInCache(id, webllm.prebuiltAppConfig);
+      const cached = await webllm.hasModelInCache(id, { ...webllm.prebuiltAppConfig, useIndexedDBCache: true });
       const now = this.snapshot.models[id];
       if (now && (ACTIVE.includes(now.status) || IN_MEMORY.includes(now.status))) return;
       this.#patchModel(id, { cached, status: cached ? "DOWNLOADED" : "NOT_DOWNLOADED", error: null });
@@ -213,7 +213,7 @@ class ModelManager {
   async refreshCacheAfterError(id) {
     try {
       const webllm = await loadWebLLM();
-      const cached = await webllm.hasModelInCache(id, webllm.prebuiltAppConfig);
+      const cached = await webllm.hasModelInCache(id, { ...webllm.prebuiltAppConfig, useIndexedDBCache: true });
       this.#patchModel(id, { cached });
     } catch {
       /* mantiene el error original */
@@ -304,7 +304,7 @@ class ModelManager {
         }
       };
       const total = await remaining();
-      await webllm.deleteModelAllInfoInCache(id, webllm.prebuiltAppConfig);
+      await webllm.deleteModelAllInfoInCache(id, { ...webllm.prebuiltAppConfig, useIndexedDBCache: true });
       // WebLLM 0.2.79 lanza deleteNDArrayCache() SIN await dentro de deleteModelInCache: la promesa devuelta
       // puede resolverse antes de que los shards desaparezcan. Se espera (máx. 60 s) a que el borrado termine de verdad.
       const jsonUrl = new URL("ndarray-cache.json", prefix).href;
@@ -327,7 +327,7 @@ class ModelManager {
       } catch {
         /* se detectará abajo con hasModelInCache */
       }
-      const still = await webllm.hasModelInCache(id, webllm.prebuiltAppConfig);
+      const still = await webllm.hasModelInCache(id, { ...webllm.prebuiltAppConfig, useIndexedDBCache: true });
       const after = await storageUsage();
       await deleteModelMeta(id);
       const freed = before != null && after != null ? Math.max(0, before - after) : null;

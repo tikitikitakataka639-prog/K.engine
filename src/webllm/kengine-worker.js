@@ -64,8 +64,11 @@ self.onmessage = async (e) => {
         }
         self.postMessage({ type: "status", value: "DOWNLOADING" });
         try {
+          // useIndexedDBCache: HuggingFace redirige los shards (.bin) a un CDN cross-origin
+          // (us.aws.cdn.hf.co) cuyas respuestas Cache.add()/Cache.put() no pueden almacenar.
+          // IndexedDB usa fetch() directo y no tiene esa limitación.
           engine = await CreateMLCEngine(record.model_id, {
-            appConfig: prebuiltAppConfig,
+            appConfig: { ...prebuiltAppConfig, useIndexedDBCache: true },
             initProgressCallback: (p) => {
               self.postMessage({ type: "progress", progress: p.progress || 0, text: p.text || "", phase: phaseOf(p) });
             },
